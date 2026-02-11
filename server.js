@@ -1,7 +1,3 @@
-process.on("uncaughtException", (err) => {
-  console.error("❌ uncaughtException:", err)
-})
-
 process.on("unhandledRejection", (reason) => {
   console.error("❌ unhandledRejection:", reason)
 })
@@ -12,7 +8,7 @@ import {__dirname} from "./utils.js"
 import { Server } from "socket.io"
 import multer from "multer"
 import path from "path"
-import fs from "fs"
+import fs from "fs/promises"
 
 const app = express()
 
@@ -28,42 +24,44 @@ app.set("view engine", "handlebars");
 app.set("views", path.join(rutarchivo, "views"));
 
 const CarpetaImagenes = path.join(rutarchivo, "data", "imagenes")
-if (!fs.existsSync(CarpetaImagenes)) {
-  fs.mkdirSync(CarpetaImagenes, { recursive: true })
+try {
+    await fs.mkdir(CarpetaImagenes, {recursive:true})
+} catch (error){ 
+    console.error (`error al ingresar a la carpeta "imagenes"`, error)
 }
-app.use("/imagenes", express.static(CarpetaImagenes))
-
 
 const ProductosGuardados = path.join(rutarchivo, "data", "products.json")
 console.log("GUARDANDO EN:", ProductosGuardados)
 
 
-const ProductosAGuardar = () => {
-    if (fs.existsSync(ProductosGuardados)){
-        return JSON.parse(fs.readFileSync(ProductosGuardados,"utf-8" ))
+async function Productosarray() {
+    try {
+    const data = await fs.readFile(ProductosGuardados, "utf-8")
+    return JSON.parse(data)
+  } catch (error){
+  return []
     }
-    return[]
 }
+let products = []
+products = await Productosarray()
 
-let products = ProductosAGuardar()
+//id autoincremental para products:
 
-function ProxId(){
-    let idmax = 0
+function ProxId(products){
+    let idnew = 0
 
     for (let i=0; i<products.length; i++){
-        if (products[i].id > idmax){
-            idmax = products[i].id
+        if (products[i].id > idnew){
+            idnew = products[i].id
         } 
     }
-    return idmax + 1
+    return idnew + 1
 }
 
 console.log("Productos cargados:", products)
 
 console.log("DIR BASE:", __dirname)
 console.log("CARPETA IMAGENES:", CarpetaImagenes)
-console.log("EXISTE?:", fs.existsSync(CarpetaImagenes))
-
 
 const storage = multer.diskStorage({
     destination: function(req, file, cb){
@@ -78,7 +76,8 @@ const storage = multer.diskStorage({
 //muestro productos
 const upload = multer({storage: storage})
 
-app.get(`/RealTimeProducts`,(req, res)=>{
+app.get(`/RealTimeProducts`, async(req, res)=>{
+    products = await Productosarray()
     res.render("RealTimeProducts", { products })
 })
 
@@ -101,39 +100,54 @@ socketServer.on(`connection`,(socket)=>{
     socket.emit(`Saludo`, `Bienvenido`)
 })
 
-app.post("/products", upload.single("thumbnail"), (req, res) => {
+app.post("/products", upload.single("thumbnail"),async (req, res) => {
     console.log(req.body)
     console.log(req.file)
     const{name, description, price, stock, code} = req.body
     const thumbnail = req.file ? "/imagenes/" + req.file.filename : ""
-    }
 
-app.delete ("/products/:id")
+    
+products = await Productosarray()
 
-    function BuscarIdDel (){
-        let IdBuscado = 1
-
-        for (i=0; i < products[i].id.length; i++){
-            if (roducts[i].id = IdBuscado){
-
-            }
-        })
-    }
-
-    let product = { 
+ let product = { 
         name,
         description, 
-        price, 
-        stock,
+        price: Number(price), 
+        stock: Number(stock),
         thumbnail,
         code,
-        id: ProxId()
+        id: ProxId(products)
     }
     products.push(product)
 
-    fs.writeFileSync(ProductosGuardados, JSON.stringify(products, null, 2))
+    await fs.writeFile(ProductosGuardados, JSON.stringify(products, null, 2))
 
     socketServer.emit("products", products)
 
     res.redirect("/RealTimeProducts")
+
+    })
+
+app.delete("/products/:id", async(req, res) => {
+    let IdABorrar = Number (req.params.id)
+
+    products = await Productosarray()
+
+    for (let i=0; i < products.length; i++){
+        if (products[i].id===IdABorrar){
+            products.splice(i,1)
+
+            await fs.writeFile(ProductosGuardados,
+            JSON.stringify(products, null, 2))
+
+            socketServer.emit ("products",products)
+
+            return res.json({
+                status: "Producto eliminado correctamente"
+            })
+        }
+    }
+
+    throw new Error (`no se encontro ${IdABorrar}`)
+
 })
