@@ -23,6 +23,7 @@ app.engine("handlebars", handlebars.engine());
 app.set("view engine", "handlebars");
 app.set("views", path.join(rutarchivo, "views"));
 
+//sino existe creo la carpeta
 const CarpetaImagenes = path.join(rutarchivo, "data", "imagenes")
 try {
     await fs.mkdir(CarpetaImagenes, {recursive:true})
@@ -63,15 +64,30 @@ console.log("Productos cargados:", products)
 console.log("DIR BASE:", __dirname)
 console.log("CARPETA IMAGENES:", CarpetaImagenes)
 
+//configuración de Multer
 const storage = multer.diskStorage({
     destination: function(req, file, cb){
         cb(null, CarpetaImagenes)},
 
     filename: function(req, file, cb){
-        const NombreImagen = Date.now() + "-" + file.originalname
-        cb(null, NombreImagen)
+        const NombreImagenF = Date.now() + "-" + file.originalname
+        cb(null, NombreImagenF)
     }
 })
+
+app.get("/imagenes/:nombre", async (req, res) => {
+  const NombreImagenGuardado = req.params.nombre
+  const rutaCompleta = path.join(CarpetaImagenes, NombreImagenGuardado)
+
+  try {
+    await fs.access(rutaCompleta)
+    res.sendFile(rutaCompleta)
+  } catch (error) {
+    res.status(404).send("Imagen no encontrada")
+  }
+})
+
+
 
 //muestro productos
 const upload = multer({storage: storage})
@@ -88,10 +104,14 @@ const httpServer = app.listen (8081, ()=> {
 
 const socketServer = new Server(httpServer)
 
-socketServer.on(`connection`,(socket)=>{
-    console.log(`se conecto el cliente`, socket.id)
-    socket.emit("products", products)
 
+//cada vez que alguien ingresa se vuelve a leer el archivo Json y se le muestra todo actualizadoo
+socketServer.on(`connection`,async(socket)=>{
+    console.log(`se conecto el cliente`, socket.id)
+
+    const productsactual = await Productosarray()
+
+    socket.emit("products", productsactual)
 
     socket.on(`disconnect`, ()=>{
         console.log(`cliente desconectado`, socket.id)
@@ -127,6 +147,7 @@ products = await Productosarray()
     res.redirect("/RealTimeProducts")
 
     })
+//Borro un producto: Recorro los productos buscando el id(primary key) a borrar, si lo encuentro lo saco del Json sino tiro 404
 
 app.delete("/products/:id", async(req, res) => {
     let IdABorrar = Number (req.params.id)
@@ -147,7 +168,5 @@ app.delete("/products/:id", async(req, res) => {
             })
         }
     }
-
-    throw new Error (`no se encontro ${IdABorrar}`)
-
+    return res.status(404).json({ error: `No se encontró el producto de id= ${IdABorrar}` })
 })
