@@ -3,12 +3,14 @@ process.on("unhandledRejection", (reason) => {
 })
 
 import express from "express"
-import handlebars, { engine } from "express-handlebars"
+import handlebars from "express-handlebars"
 import {__dirname} from "./utils.js"
 import { Server } from "socket.io"
-import multer from "multer"
 import path from "path"
 import fs from "fs/promises"
+
+import { Productosarray } from "./manager/ProductManager.js"
+
 
 const app = express()
 
@@ -31,49 +33,8 @@ try {
     console.error (`error al ingresar a la carpeta "imagenes"`, error)
 }
 
-const ProductosGuardados = path.join(rutarchivo, "data", "products.json")
-console.log("GUARDANDO EN:", ProductosGuardados)
-
-
-async function Productosarray() {
-    try {
-    const data = await fs.readFile(ProductosGuardados, "utf-8")
-    return JSON.parse(data)
-  } catch (error){
-  return []
-    }
-}
-let products = []
-products = await Productosarray()
-
-//id autoincremental para products:
-
-function ProxId(products){
-    let idnew = 0
-
-    for (let i=0; i<products.length; i++){
-        if (products[i].id > idnew){
-            idnew = products[i].id
-        } 
-    }
-    return idnew + 1
-}
-
-console.log("Productos cargados:", products)
-
 console.log("DIR BASE:", __dirname)
 console.log("CARPETA IMAGENES:", CarpetaImagenes)
-
-//configuración de Multer
-const storage = multer.diskStorage({
-    destination: function(req, file, cb){
-        cb(null, CarpetaImagenes)},
-
-    filename: function(req, file, cb){
-        const NombreImagenF = Date.now() + "-" + file.originalname
-        cb(null, NombreImagenF)
-    }
-})
 
 app.get("/imagenes/:nombre", async (req, res) => {
   const NombreImagenGuardado = req.params.nombre
@@ -87,13 +48,9 @@ app.get("/imagenes/:nombre", async (req, res) => {
   }
 })
 
-
-
 //muestro productos
-const upload = multer({storage: storage})
-
 app.get(`/RealTimeProducts`, async(req, res)=>{
-    products = await Productosarray()
+    let products = await Productosarray()
     res.render("RealTimeProducts", { products })
 })
 
@@ -104,6 +61,10 @@ const httpServer = app.listen (8081, ()=> {
 
 const socketServer = new Server(httpServer)
 
+app.set("io", socketServer)
+
+import productsRouter from "./routes/products.router.js"
+app.use("/", productsRouter)
 
 //cada vez que alguien ingresa se vuelve a leer el archivo Json y se le muestra todo actualizadoo
 socketServer.on(`connection`,async(socket)=>{
@@ -118,55 +79,4 @@ socketServer.on(`connection`,async(socket)=>{
     })
 
     socket.emit(`Saludo`, `Bienvenido`)
-})
-
-app.post("/products", upload.single("thumbnail"),async (req, res) => {
-    console.log(req.body)
-    console.log(req.file)
-    const{name, description, price, stock, code} = req.body
-    const thumbnail = req.file ? "/imagenes/" + req.file.filename : ""
-
-    
-products = await Productosarray()
-
- let product = { 
-        name,
-        description, 
-        price: Number(price), 
-        stock: Number(stock),
-        thumbnail,
-        code,
-        id: ProxId(products)
-    }
-    products.push(product)
-
-    await fs.writeFile(ProductosGuardados, JSON.stringify(products, null, 2))
-
-    socketServer.emit("products", products)
-
-    res.redirect("/RealTimeProducts")
-
-    })
-//Borro un producto: Recorro los productos buscando el id(primary key) a borrar, si lo encuentro lo saco del Json sino tiro 404
-
-app.delete("/products/:id", async(req, res) => {
-    let IdABorrar = Number (req.params.id)
-
-    products = await Productosarray()
-
-    for (let i=0; i < products.length; i++){
-        if (products[i].id===IdABorrar){
-            products.splice(i,1)
-
-            await fs.writeFile(ProductosGuardados,
-            JSON.stringify(products, null, 2))
-
-            socketServer.emit ("products",products)
-
-            return res.json({
-                status: "Producto eliminado correctamente"
-            })
-        }
-    }
-    return res.status(404).json({ error: `No se encontró el producto de id= ${IdABorrar}` })
 })
